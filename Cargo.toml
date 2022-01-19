@@ -1,0 +1,12 @@
+[package]
+name = "veather"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+vek = "*"
+simdnoise = "3.1.6"
+minifb = "0.16.0"
+lazy_static = "1.4.0"
