@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut};
 use vek::*;
 

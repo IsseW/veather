@@ -5,24 +5,24 @@ use vek::*;
 
 #[derive(Default, Clone)]
 pub struct Constants {
-    pub alt: f32,
-    pub normal: Vec3<f32>,
-    pub humidity: f32,
-    pub temp: f32,
+    pub alt: f64,
+    pub normal: Vec3<f64>,
+    pub humidity: f64,
+    pub temp: f64,
 }
 
 #[derive(Default, Clone)]
 pub struct Cell {
-    pub wind: Vec3<f32>,
-    pub temperature: f32,
-    pub moisture: f32,
-    pub cloud: f32,
+    pub wind: Vec3<f64>,
+    pub temperature: f64,
+    pub moisture: f64,
+    pub cloud: f64,
 }
 
-impl std::ops::Mul<f32> for Cell {
+impl std::ops::Mul<f64> for Cell {
     type Output = Self;
 
-    fn mul(self, rhs: f32) -> Self {
+    fn mul(self, rhs: f64) -> Self {
         Self {
             wind: self.wind * rhs,
             temperature: self.temperature * rhs,
@@ -70,11 +70,12 @@ lazy_static! {
             .generate_scaled(0.0, 0.4);
 
         volume.iter_mut().enumerate().for_each(|(i, (pos, cell))| {
-            cell.wind =
-                Vec3::new(wind_x[i].powi(3), wind_y[i].powi(3), 0.0) * 30.0 / (3 - pos.z) as f32;
-            cell.temperature = temperature[i].powi(3) * 30.0;
-            cell.moisture = moisture[i].powi(3);
-            cell.cloud = cloud[i].powi(3);
+            cell.wind = Vec3::new((wind_x[i] as f64).powi(3), (wind_y[i] as f64).powi(3), 0.0)
+                * 30.0
+                / (3 - pos.z) as f64;
+            cell.temperature = (temperature[i] as f64).powi(3) * 30.0;
+            cell.moisture = (moisture[i] as f64).powi(3);
+            cell.cloud = (cloud[i] as f64).powi(3);
         });
 
         volume
@@ -84,31 +85,37 @@ lazy_static! {
 /// Used to sample weather that isn't simulated
 fn sample_cell(p: Vec3<i32>, time: f64) -> Cell {
     // return Cell::default();
-    let p0 = NOISE
-        .get((p + NOISE.size()) % NOISE.size())
-        .unwrap()
-        .clone();
-    let p1 = NOISE
-        .get((p + Vec3::new(1, 1, 0) + NOISE.size()) % NOISE.size())
-        .unwrap()
-        .clone();
-    let t = ((time / 24.0) % 1.0) as f32;
-    p0 * (1.0 - t) + p1 * t
+    //let p0 = NOISE
+    //    .get((p + NOISE.size()) % NOISE.size())
+    //    .unwrap()
+    //    .clone();
+    //let p1 = NOISE
+    //    .get((p + Vec3::new(1, 1, 0) + NOISE.size()) % NOISE.size())
+    //    .unwrap()
+    //    .clone();
+    //let t = ((time / 24.0) % 1.0) as f64;
+    //p0 * (1.0 - t) + p1 * t
+    Cell {
+        wind: Vec3::new(10.0, 10.0, 0.0),
+        temperature: 10.0,
+        moisture: 0.5,
+        cloud: if p.x % 8 == p.y % 8 { 1.0 } else { 0.0 },
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Weather {
     /// Clouds currently in the area between 0 and 1
-    pub cloud: f32,
+    pub cloud: f64,
     /// Rain per time, between 0 and 1
-    pub rain: f32,
+    pub rain: f64,
     // Wind direction in block / second
-    pub wind: Vec3<f32>,
+    pub wind: Vec3<f64>,
 }
 
 #[derive(Clone, Copy, Default)]
 pub struct WeatherInfo {
-    pub lightning_chance: f32,
+    pub lightning_chance: f64,
 }
 
 pub struct WeatherSim {
@@ -118,15 +125,15 @@ pub struct WeatherSim {
     info: Grid<WeatherInfo>,
 }
 
-const WATER_BOILING_POINT: f32 = 100.0;
-const MAX_WIND_SPEED: f32 = 128.0;
-pub(crate) const CELL_SIZE: f32 = (16 * 32) as f32;
-pub(crate) const DT: f32 = CELL_SIZE / MAX_WIND_SPEED;
-pub(crate) const MAX_ALT: f32 = 2000.0;
-pub(crate) const SIM_ALT: f32 = 4500.0;
-pub(crate) const CELL_HEIGHT: f32 = SIM_ALT / 3.0;
+const WATER_BOILING_POINT: f64 = 100.0;
+const MAX_WIND_SPEED: f64 = 128.0;
+pub(crate) const CELL_SIZE: f64 = (16 * 32) as f64;
+pub(crate) const DT: f64 = CELL_SIZE / MAX_WIND_SPEED;
+pub(crate) const MAX_ALT: f64 = 2000.0;
+pub(crate) const SIM_ALT: f64 = 4500.0;
+pub(crate) const CELL_HEIGHT: f64 = SIM_ALT / 3.0;
 
-fn get_normal(p: f32, left: f32, right: f32, bottom: f32, top: f32) -> Vec3<f32> {
+fn get_normal(p: f64, left: f64, right: f64, bottom: f64, top: f64) -> Vec3<f64> {
     let mut x0 = Vec3::new(CELL_SIZE, 0.0, p - left)
         .cross(Vec3::new(0.0, CELL_SIZE, 0.0))
         .normalized();
@@ -184,15 +191,15 @@ impl WeatherSim {
                 let mut consts = (0..size.x * size.y)
                     .map(|i| {
                         let p = Vec2::new(i % size.x, i / size.x);
-                        let extent = size.x.min(size.y) as f32 / 2.0;
+                        let extent = size.x.min(size.y) as f64 / 2.0;
                         Constants {
-                            alt: (alts[i].powi(3) * MAX_ALT + 500.0)
+                            alt: ((alts[i] as f64).powi(3) * MAX_ALT + 500.0)
                                 * (1.0
-                                    - p.as_::<f32>()
+                                    - p.as_::<f64>()
                                         .distance(Vec2::new(size.x / 2, size.y / 2).as_())
                                         / (extent)),
-                            humidity: humidities[i],
-                            temp: temperatures[i],
+                            humidity: humidities[i] as f64,
+                            temp: temperatures[i] as f64,
                             normal: Vec3::zero(),
                         }
                     })
@@ -200,18 +207,20 @@ impl WeatherSim {
                 for i in 0..size.x * size.y {
                     consts[i].normal = get_normal(
                         consts[i].alt,
-                        alts[(i.checked_sub(1).unwrap_or(0)).max((i / size.x) * size.x)],
-                        alts[(i + 1).min((i / size.x + 1) * size.x - 1)],
-                        alts[if (i as isize - size.x as isize) < 0 {
+                        consts[(i.checked_sub(1).unwrap_or(0)).max((i / size.x) * size.x)].alt,
+                        consts[(i + 1).min((i / size.x + 1) * size.x - 1)].alt,
+                        consts[if (i as isize - size.x as isize) < 0 {
                             i
                         } else {
                             i - size.x
-                        }],
-                        alts[if i + size.x >= size.x * size.y {
+                        }]
+                        .alt,
+                        consts[if i + size.x >= size.x * size.y {
                             i
                         } else {
                             i + size.x
-                        }],
+                        }]
+                        .alt,
                     );
                 }
                 consts
@@ -252,27 +261,27 @@ impl WeatherSim {
         .filter(|p| {
             self.consts
                 .get(p.xy())
-                .map_or(true, |c| c.alt < CELL_HEIGHT * (p.z + 1) as f32)
+                .map_or(true, |c| c.alt < CELL_HEIGHT * (p.z + 1) as f64)
         })
         .collect();
         let points: Vec<_> = self
             .cells
             .iter_index()
-            .filter(|p| self.consts[p.xy()].alt < CELL_HEIGHT * (p.z + 1) as f32)
+            .filter(|p| self.consts[p.xy()].alt < CELL_HEIGHT * (p.z + 1) as f64)
             .collect();
 
         let mut swap = Volume::new(self.cells.size(), Cell::default());
 
         // Disperse
         for &point in &points_outer {
-            fn get_spread_volume(dir: Vec3<i32>) -> f32 {
-                const HORIZONTAL_DISSIPATION: f32 = 0.1;
-                const VERTICAL_DISSIPATION: f32 = 0.02;
+            fn get_spread_volume(dir: Vec3<i32>) -> f64 {
+                const HORIZONTAL_DISSIPATION: f64 = 0.01;
+                const VERTICAL_DISSIPATION: f64 = 0.004;
                 let spread_x = CELL_SIZE * HORIZONTAL_DISSIPATION;
                 let spread_y = CELL_SIZE * VERTICAL_DISSIPATION;
                 (if dir.x == 0 { CELL_SIZE } else { spread_x })
                     * (if dir.y == 0 { CELL_SIZE } else { spread_x })
-                    * (if dir.z == 0 { CELL_SIZE } else { spread_y })
+                    * (if dir.z == 0 { CELL_HEIGHT } else { spread_y })
             }
 
             let neighbors: Vec<_> = (0..27)
@@ -280,27 +289,29 @@ impl WeatherSim {
                 .filter(|p| {
                     let p = p + point;
 
-                    (0..self.cells.size().x).contains(&p.x)
-                        && (0..self.cells.size().y).contains(&p.y)
-                        && (0..self.cells.size().z).contains(&p.z)
+                    (0..self.cells.size().z).contains(&p.z)
                         // Don't interact with cells that are underground
-                        && self.consts[p.xy()].alt < CELL_HEIGHT * (p.z + 1) as f32
+                        && self.consts.get(p.xy()).map(|c| c.alt < CELL_HEIGHT * (p.z + 1) as f64).unwrap_or(true)
                 })
-                .map(|dir| (dir, get_spread_volume(dir)))
+                .map(|dir| (dir + point, get_spread_volume(dir)))
                 .collect();
 
-            let spread_volume: f32 = neighbors.iter().map(|(_, vol)| vol).sum();
+            let spread_volume: f64 = neighbors.iter().map(|(_, vol)| vol).sum();
             let cell = self.get_cell(point, time);
 
-            for (neighbor, vol) in neighbors {
-                let p = neighbor + point;
-                let part = vol / spread_volume;
-                swap[p].cloud = fractional_add(swap[p].cloud, cell.cloud * part, 2.0);
-                swap[p].moisture = fractional_add(swap[p].moisture, cell.moisture * part, 2.5);
-                swap[p].temperature += cell.temperature * part;
-                swap[p].wind += cell.wind * part;
+            for (p, vol) in neighbors {
+                if let Some(c) = swap.get_mut(p) {
+                    let part = vol / spread_volume;
+                    c.cloud += cell.cloud * part;
+                    c.moisture += cell.moisture * part;
+                    c.temperature += cell.temperature * part;
+                    c.wind += cell.wind * part;
+                }
             }
         }
+        self.cells
+            .iter_mut()
+            .for_each(|(_, c)| *c = Cell::default());
 
         // Wind
         for &point in &points_outer {
@@ -311,40 +322,57 @@ impl WeatherSim {
                 dir.as_::<i32>()
             };
 
-            let get_spread_volume = |dir: Vec3<i32>, vel: Vec3<f32>| {
+            fn get_spread_volume(dir: Vec3<i32>, vel: Vec3<f64>) -> f64 {
                 (if dir.x == 0 { CELL_SIZE - vel.x } else { vel.x })
                     * (if dir.y == 0 { CELL_SIZE - vel.y } else { vel.y })
-                    * (if dir.z == 0 { CELL_SIZE - vel.z } else { vel.z })
-            };
+                    * (if dir.z == 0 {
+                        CELL_HEIGHT - vel.z
+                    } else {
+                        vel.z
+                    })
+            }
 
             let neighbors: Vec<_> = (0..8)
                 .map(|i| dir_vec * Vec3::new(i / 4, i / 2 % 2, i % 2))
                 .filter(|&p| {
                     let p = p + point;
-
-                    (0..self.cells.size().x).contains(&p.x)
-                        && (0..self.cells.size().y).contains(&p.y)
-                        && (0..self.cells.size().z).contains(&p.z)
+                    let res = (0..self.cells.size().z).contains(&p.z)
                         // Don't interact with cells that are underground
-                        && self.consts[p.xy()].alt < CELL_HEIGHT * (p.z + 1) as f32
-                })
-                .map(|dir| (dir, get_spread_volume(dir, cell.wind)))
-                .collect();
-            let spread_volume: f32 = neighbors.iter().map(|(_, vol)| vol).sum();
+                        && self.consts.get(p.xy()).map(|c| c.alt < CELL_HEIGHT * (p.z + 1) as f64).unwrap_or(true);
 
+                    if p == point && !res {
+                        panic!("{:?}", p);
+                    }
+                    res
+                })
+                .map(|dir| (dir + point, get_spread_volume(dir, cell.wind)))
+                .collect();
+            let spread_volume: f64 = neighbors.iter().map(|(_, vol)| vol).sum();
+            if spread_volume < get_spread_volume(Vec3::zero(), cell.wind) {
+                panic!(
+                    "{} < {}",
+                    spread_volume,
+                    get_spread_volume(Vec3::zero(), cell.wind)
+                )
+            }
+            if spread_volume - CELL_SIZE * CELL_SIZE * CELL_HEIGHT > 0.1 {
+                panic!(
+                    "{} > {}",
+                    spread_volume,
+                    CELL_SIZE * CELL_SIZE * CELL_HEIGHT
+                )
+            }
             let cell = swap
                 .get(point)
                 .cloned()
                 .unwrap_or_else(|| sample_cell(point, time));
-            for (neighbor, vol) in neighbors {
-                let p = neighbor + point;
-                if swap.get(p).is_some() {
+            for (p, vol) in neighbors {
+                if let Some(c) = self.cells.get_mut(p) {
                     let part = vol / spread_volume;
-                    self.cells[p].cloud = fractional_add(swap[p].cloud, cell.cloud * part, 2.0);
-                    self.cells[p].moisture =
-                        fractional_add(swap[p].moisture, cell.moisture * part, 2.5);
-                    self.cells[p].temperature += cell.temperature * part;
-                    self.cells[p].wind += cell.wind * part;
+                    c.cloud += cell.cloud * part;
+                    c.moisture += cell.moisture * part;
+                    c.temperature += cell.temperature * part;
+                    c.wind += cell.wind * part;
                 }
             }
         }
@@ -352,41 +380,49 @@ impl WeatherSim {
         let mut max_wind = Vec3::zero();
         let mut max_moisture = 0.0;
         let mut max_cloud = 0.0;
+        let mut max_rain = 0.0;
         let mut max_condens = 0.0;
         for &point in &points {
             // Some variables only apply if the ground is within the cell.
-            let grounded = point.z as f32 * CELL_HEIGHT < self.consts[point.xy()].alt;
+            let grounded = point.z as f64 * CELL_HEIGHT < self.consts[point.xy()].alt;
 
             self.cells[point].temperature = if grounded {
-                f32::lerp(swap[point].temperature, self.consts[point.xy()].temp, 0.1)
+                f64::lerp(
+                    self.cells[point].temperature,
+                    self.consts[point.xy()].temp,
+                    0.1,
+                )
             } else {
-                swap[point].temperature
+                self.cells[point].temperature
             };
 
             // Deflect and apply friction to wind.
             self.cells[point].wind = if grounded {
-                let reflect = if swap[point].wind.dot(self.consts[point.xy()].normal) < 0.0 {
-                    swap[point].wind.reflected(self.consts[point.xy()].normal)
+                let reflect = if self.cells[point].wind.dot(self.consts[point.xy()].normal) < 0.0 {
+                    self.cells[point]
+                        .wind
+                        .reflected(self.consts[point.xy()].normal)
                 } else {
-                    swap[point].wind
+                    self.cells[point].wind
                 };
                 let friction =
-                    (self.consts[point.xy()].alt - point.z as f32 * CELL_HEIGHT) / CELL_HEIGHT;
+                    (self.consts[point.xy()].alt - point.z as f64 * CELL_HEIGHT) / CELL_HEIGHT;
 
-                Vec3::lerp(swap[point].wind, reflect, friction * 0.7) * (1.0 - friction * 0.01)
+                Vec3::lerp(self.cells[point].wind, reflect, friction * 0.7)
+                    * (1.0 - friction * 0.01)
             } else {
-                swap[point].wind
+                self.cells[point].wind
             };
 
             // Constants NOAA use. https://en.wikipedia.org/wiki/National_Oceanic_and_Atmospheric_Administration
             // There are other sets of constants, might be worth to give them a try
-            const B: f32 = 18.678;
-            const C: f32 = 257.14;
+            const B: f64 = 18.678;
+            const C: f64 = 257.14;
             // he dew point is the temperature to which air must be cooled to become saturated with water vapor https://en.wikipedia.org/wiki/Dew_point
-            let dew_point = (swap[point].moisture / 100.0).ln()
+            let dew_point = (self.cells[point].moisture / 100.0).ln()
                 + B * self.cells[point].temperature / (C + self.cells[point].temperature);
             // TODO: convert into a function
-            const CRITICAL_UPDRAUGHT: f32 = 20.0;
+            const CRITICAL_UPDRAUGHT: f64 = 20.0;
             let evaporation = if grounded && self.cells[point].temperature >= CRITICAL_UPDRAUGHT {
                 self.consts[point.xy()].humidity
                     * (self.cells[point].temperature - CRITICAL_UPDRAUGHT)
@@ -396,39 +432,40 @@ impl WeatherSim {
 
             let condensation = if dew_point >= self.cells[point].temperature {
                 // Moisture -> Cloud
-                0.25 * swap[point].moisture
+                0.025 * self.cells[point].moisture
             } else {
                 // Cloud -> Moisture
-                -0.5 * swap[point].cloud
+                -0.05 * self.cells[point].cloud
             };
 
-            const LATENT_MOISTURE_HEAT: f32 = 0.01;
+            const LATENT_MOISTURE_HEAT: f64 = 0.01;
             // Temperature change arising from condensation
             self.cells[point].temperature -= LATENT_MOISTURE_HEAT * condensation;
 
-            self.cells[point].moisture = fractional_add(
-                if grounded {
-                    f32::lerp(swap[point].moisture, self.consts[point.xy()].humidity, 0.1)
-                } else {
-                    swap[point].moisture
-                },
-                condensation + evaporation,
-                2.5,
-            );
+            self.cells[point].moisture = if grounded {
+                f64::lerp(
+                    self.cells[point].moisture,
+                    self.consts[point.xy()].humidity,
+                    0.1,
+                )
+            } else {
+                self.cells[point].moisture
+            } + condensation
+                + evaporation;
 
-            const RAIN_AMOUNT: f32 = 0.02;
+            const RAIN_AMOUNT: f64 = 0.2;
             // At what cloud density it starts raining
             // TODO: Make this a function of temperature?
-            const RAIN_CRITICAL: f32 = 0.2;
-            let rain = if swap[point].cloud > RAIN_CRITICAL {
-                RAIN_AMOUNT * (swap[point].cloud - RAIN_CRITICAL)
+            const RAIN_CRITICAL: f64 = 0.3;
+            let rain = if self.cells[point].cloud > RAIN_CRITICAL {
+                RAIN_AMOUNT * (self.cells[point].cloud - RAIN_CRITICAL) / (1.0 - RAIN_CRITICAL)
             } else {
                 0.0
             };
-            self.cells[point].cloud = fractional_add(swap[point].cloud, condensation - rain, 2.0);
+            self.cells[point].cloud += condensation - rain;
 
             self.weather[point].wind = self.cells[point].wind;
-            self.weather[point].cloud = self.cells[point].cloud * 100.0;
+            self.weather[point].cloud = self.cells[point].cloud;
             self.weather[point].rain = rain;
 
             if self.cells[point].temperature > max_temp {
@@ -443,19 +480,13 @@ impl WeatherSim {
             if self.cells[point].cloud > max_cloud {
                 max_cloud = self.cells[point].cloud;
             }
+            if self.weather[point].rain > max_rain {
+                max_rain = self.weather[point].rain;
+            }
             if condensation < self.consts[point.xy()].temp {
                 max_condens = condensation;
             }
         }
-        println!("Maxes:\n\tTemperature: {max_temp}\n\tWind: {max_wind}\n\tMoisture: {max_moisture}\n\tCloud: {max_cloud}\n\tCondensation: {max_condens}");
-    }
-}
-
-/// Adds an arbitrary float to a number between 0 and 1. And keeps the result between 0 and 1.
-fn fractional_add(a: f32, b: f32, scale: f32) -> f32 {
-    if b >= 0.0 {
-        a + (1.0 - a) * b / (scale + b)
-    } else {
-        a - a * b / (scale + b)
+        println!("Maxes:\n\tTemperature: {max_temp}\n\tWind: {max_wind}\n\tMoisture: {max_moisture}\n\tCloud: {max_cloud}\n\tRain: {max_rain}\n\tCondensation: {max_condens}");
     }
 }

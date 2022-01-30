@@ -1,6 +1,6 @@
-use std::{env, time::Instant};
+use std::{env, ops::Range, time::Instant};
 
-use minifb::{Key, Scale, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
 use sim::MAX_ALT;
 use vek::{Vec2, Vec3};
 
@@ -12,18 +12,24 @@ mod sim;
 const WIDTH: usize = 256;
 const HEIGHT: usize = 256;
 
-enum DisplayMode {
+enum DisplayKind {
     Altitude,
     Clouds,
     Wind,
+    Rain,
+}
+
+struct DisplayMode {
+    kind: DisplayKind,
+    range: Range<i32>,
 }
 
 impl DisplayMode {
-    fn display(&self, buffer: &mut Vec<f32>, sim: &WeatherSim) {
+    fn display(&self, buffer: &mut Vec<f64>, sim: &WeatherSim) {
         let weather = sim.get_weather();
         let consts = sim.get_consts();
-        match self {
-            DisplayMode::Altitude => {
+        match self.kind {
+            DisplayKind::Altitude => {
                 for (p, c) in consts.iter() {
                     let t = c.alt / MAX_ALT;
                     let i = (p.y as usize * WIDTH + p.x as usize) * 3;
@@ -32,20 +38,38 @@ impl DisplayMode {
                     buffer[i + 2] = t;
                 }
             }
-            DisplayMode::Clouds => {
+            DisplayKind::Clouds => {
                 for (p, weather) in weather.iter() {
-                    let t = weather.cloud / 3.0;
+                    if !self.range.contains(&p.z) {
+                        continue;
+                    }
+                    let t = weather.cloud / self.range.len() as f64;
                     let i = (p.y as usize * WIDTH + p.x as usize) * 3;
                     buffer[i] += t;
                     buffer[i + 1] += t;
                     buffer[i + 2] += t;
                 }
             }
-            DisplayMode::Wind => {
+            DisplayKind::Rain => {
                 for (p, weather) in weather.iter() {
+                    if !self.range.contains(&p.z) {
+                        continue;
+                    }
+                    let t = weather.rain / self.range.len() as f64;
                     let i = (p.y as usize * WIDTH + p.x as usize) * 3;
-                    let wind = if weather.wind.magnitude_squared() > f32::EPSILON {
-                        (weather.wind.normalized() + 1.0) / 2.0 / 3.0
+                    buffer[i] += t;
+                    buffer[i + 1] += t;
+                    buffer[i + 2] += t;
+                }
+            }
+            DisplayKind::Wind => {
+                for (p, weather) in weather.iter() {
+                    if !self.range.contains(&p.z) {
+                        continue;
+                    }
+                    let i = (p.y as usize * WIDTH + p.x as usize) * 3;
+                    let wind = if weather.wind.magnitude_squared() > f64::EPSILON {
+                        (weather.wind.normalized() + 1.0) / 2.0 / self.range.len() as f64
                     } else {
                         Vec3::zero()
                     };
@@ -63,17 +87,47 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     let display_mode = if args.len() > 1 {
+        let range = args
+            .get(2)
+            .map(|s| {
+                s.split_once("..")
+                    .map(|(a, b)| {
+                        a.parse::<i32>()
+                            .ok()
+                            .zip(b.parse::<i32>().ok())
+                            .map(|(a, b)| a..b)
+                    })
+                    .flatten()
+            })
+            .flatten()
+            .unwrap_or(0..3);
         match args[1].as_str() {
-            "alt" => DisplayMode::Altitude,
-            "cloud" => DisplayMode::Clouds,
-            "wind" => DisplayMode::Wind,
+            "alt" => DisplayMode {
+                kind: DisplayKind::Altitude,
+                range,
+            },
+            "cloud" => DisplayMode {
+                kind: DisplayKind::Clouds,
+                range,
+            },
+            "wind" => DisplayMode {
+                kind: DisplayKind::Wind,
+                range,
+            },
+            "rain" => DisplayMode {
+                kind: DisplayKind::Rain,
+                range,
+            },
             _ => panic!("Invalid display mode"),
         }
     } else {
-        DisplayMode::Clouds
+        DisplayMode {
+            kind: DisplayKind::Clouds,
+            range: 0..3,
+        }
     };
 
-    let mut float_buffer: Vec<f32> = vec![0.0; WIDTH * HEIGHT * 3];
+    let mut float_buffer: Vec<f64> = vec![0.0; WIDTH * HEIGHT * 3];
     let mut buffer: Vec<u32> = vec![0x00_FF_FF_FF; WIDTH * HEIGHT];
 
     let options = WindowOptions {
@@ -89,8 +143,8 @@ fn main() {
     let mut tick: u64 = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let now = Instant::now();
-        if (now - last_update).as_secs_f64() > 0.01 {
-            sim.tick((now - first_update).as_secs_f64());
+        if window.is_key_down(Key::Space) || window.is_key_pressed(Key::Right, KeyRepeat::Yes) {
+            sim.tick(1.0);
             float_buffer.iter_mut().for_each(|x| *x = 0.0);
 
             display_mode.display(&mut float_buffer, &sim);
