@@ -1,5 +1,6 @@
 use crate::grid::{Grid, Volume};
 use lazy_static::lazy_static;
+use ordered_float::NotNan;
 use simdnoise::NoiseBuilder;
 use vek::*;
 
@@ -323,6 +324,7 @@ impl WeatherSim {
             };
 
             fn get_spread_volume(dir: Vec3<i32>, vel: Vec3<f64>) -> f64 {
+                let vel = vel.map(|e| e.abs());
                 (if dir.x == 0 { CELL_SIZE - vel.x } else { vel.x })
                     * (if dir.y == 0 { CELL_SIZE - vel.y } else { vel.y })
                     * (if dir.z == 0 {
@@ -339,29 +341,11 @@ impl WeatherSim {
                     let res = (0..self.cells.size().z).contains(&p.z)
                         // Don't interact with cells that are underground
                         && self.consts.get(p.xy()).map(|c| c.alt < CELL_HEIGHT * (p.z + 1) as f64).unwrap_or(true);
-
-                    if p == point && !res {
-                        panic!("{:?}", p);
-                    }
                     res
                 })
                 .map(|dir| (dir + point, get_spread_volume(dir, cell.wind)))
                 .collect();
-            let spread_volume: f64 = neighbors.iter().map(|(_, vol)| vol).sum();
-            if spread_volume < get_spread_volume(Vec3::zero(), cell.wind) {
-                panic!(
-                    "{} < {}",
-                    spread_volume,
-                    get_spread_volume(Vec3::zero(), cell.wind)
-                )
-            }
-            if spread_volume - CELL_SIZE * CELL_SIZE * CELL_HEIGHT > 0.1 {
-                panic!(
-                    "{} > {}",
-                    spread_volume,
-                    CELL_SIZE * CELL_SIZE * CELL_HEIGHT
-                )
-            }
+            let spread_volume: f64 = CELL_SIZE * CELL_SIZE * CELL_HEIGHT;
             let cell = swap
                 .get(point)
                 .cloned()
@@ -396,6 +380,31 @@ impl WeatherSim {
                 self.cells[point].temperature
             };
 
+            // Wind pull from difference in temperature i.e pressure
+            let wind_pull = (0..27)
+                .map(|i| Vec3::new(1 - i / 9, 1 - i % 9 / 3, 1 - i % 3))
+                .filter(|p| {
+                    *p != Vec3::zero() && {
+                        let p = p + point;
+                        (0..self.cells.size().z).contains(&p.z)
+                            && self
+                                .consts
+                                .get(p.xy())
+                                .map(|c| c.alt < CELL_HEIGHT * (p.z + 1) as f64)
+                                .unwrap_or(false)
+                    }
+                })
+                .map(|p| {
+                    let temp_diff =
+                        self.cells[point].temperature - self.cells[p + point].temperature;
+                    if (p.z == -1 && temp_diff > 0.0) || (p.z == 1 && temp_diff < 0.0) {
+                        Vec3::zero()
+                    } else {
+                        temp_diff * p.as_().normalized() / 30.0
+                    }
+                })
+                .sum::<Vec3<f64>>();
+
             // Deflect and apply friction to wind.
             self.cells[point].wind = if grounded {
                 let reflect = if self.cells[point].wind.dot(self.consts[point.xy()].normal) < 0.0 {
@@ -412,7 +421,10 @@ impl WeatherSim {
                     * (1.0 - friction * 0.01)
             } else {
                 self.cells[point].wind
-            };
+            } + wind_pull;
+            if self.cells[point].wind.magnitude_squared() > CELL_SIZE * CELL_SIZE {
+                self.cells[point].wind = self.cells[point].wind.normalized() * CELL_SIZE;
+            }
 
             // Constants NOAA use. https://en.wikipedia.org/wiki/National_Oceanic_and_Atmospheric_Administration
             // There are other sets of constants, might be worth to give them a try
