@@ -198,7 +198,8 @@ impl WeatherSim {
                                 * (1.0
                                     - p.as_::<f64>()
                                         .distance(Vec2::new(size.x / 2, size.y / 2).as_())
-                                        / (extent)),
+                                        / (extent))
+                                    .max(0.3),
                             humidity: humidities[i] as f64,
                             temp: temperatures[i] as f64,
                             normal: Vec3::zero(),
@@ -367,6 +368,10 @@ impl WeatherSim {
         let mut max_rain = 0.0;
         let mut max_condens = 0.0;
         for &point in &points {
+            if (point.z + 1) as f64 * CELL_HEIGHT < self.consts[point.xy()].alt {
+                // Skip if cell is underground
+                continue;
+            }
             // Some variables only apply if the ground is within the cell.
             let grounded = point.z as f64 * CELL_HEIGHT < self.consts[point.xy()].alt;
 
