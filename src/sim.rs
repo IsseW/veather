@@ -110,6 +110,8 @@ pub struct Weather {
     pub cloud: f64,
     /// Rain per time, between 0 and 1
     pub rain: f64,
+    /// Rain per time, between 0 and 1
+    pub snow: f64,
     // Wind direction in block / second
     pub wind: Vec3<f64>,
 }
@@ -368,10 +370,6 @@ impl WeatherSim {
         let mut max_rain = 0.0;
         let mut max_condens = 0.0;
         for &point in &points {
-            if (point.z + 1) as f64 * CELL_HEIGHT < self.consts[point.xy()].alt {
-                // Skip if cell is underground
-                continue;
-            }
             // Some variables only apply if the ground is within the cell.
             let grounded = point.z as f64 * CELL_HEIGHT < self.consts[point.xy()].alt;
 
@@ -405,7 +403,7 @@ impl WeatherSim {
                     if (p.z == -1 && temp_diff > 0.0) || (p.z == 1 && temp_diff < 0.0) {
                         Vec3::zero()
                     } else {
-                        temp_diff * p.as_().normalized() / 30.0
+                        temp_diff * p.as_().normalized() / 300.0
                     }
                 })
                 .sum::<Vec3<f64>>();
@@ -420,13 +418,13 @@ impl WeatherSim {
                     self.cells[point].wind
                 };
                 let friction =
-                    (self.consts[point.xy()].alt - point.z as f64 * CELL_HEIGHT) / CELL_HEIGHT;
+                    ((self.consts[point.xy()].alt - point.z as f64 * CELL_HEIGHT + CELL_HEIGHT) / CELL_HEIGHT).clamp(0.0, 1.0);
 
-                Vec3::lerp(self.cells[point].wind, reflect, friction * 0.7)
+                Vec3::lerp(self.cells[point].wind, reflect, friction * 0.05)
                     * (1.0 - friction * 0.01)
             } else {
                 self.cells[point].wind
-            } + wind_pull;
+            };
             if self.cells[point].wind.magnitude_squared() > CELL_SIZE * CELL_SIZE {
                 self.cells[point].wind = self.cells[point].wind.normalized() * CELL_SIZE;
             }
@@ -483,7 +481,13 @@ impl WeatherSim {
 
             self.weather[point].wind = self.cells[point].wind;
             self.weather[point].cloud = self.cells[point].cloud;
-            self.weather[point].rain = rain;
+
+            const RAIN_SPEED: f64 = 9.0;
+
+            if let Some(w) = self.weather.get_mut(point - Vec3::unit_z()) {
+                w.rain += rain * RAIN_SPEED / CELL_HEIGHT
+            }
+            self.weather[point].rain = rain * (1.0 - RAIN_SPEED / CELL_HEIGHT);
 
             if self.cells[point].temperature > max_temp {
                 max_temp = self.cells[point].temperature;

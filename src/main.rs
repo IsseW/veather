@@ -1,6 +1,7 @@
+#![feature(let_chains)]
 use std::{env, ops::Range, time::Instant};
 
-use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
+use show_image::{create_window, event::{WindowEvent, VirtualKeyCode}, ImageView, ImageInfo};
 use sim::MAX_ALT;
 use vek::{Vec2, Vec3};
 
@@ -12,11 +13,11 @@ mod sim;
 const WIDTH: usize = 250;
 const HEIGHT: usize = 250;
 
-const WANTED_WIDTH: usize = 600;
-const WANTED_HEIGHT: usize = 600;
+const TARGET_WIDTH: usize = 600;
+const TARGET_HEIGHT: usize = 600;
 
-const WINDOW_WIDTH: usize = (WANTED_WIDTH / WIDTH) * WIDTH;
-const WINDOW_HEIGHT: usize = (WANTED_HEIGHT / HEIGHT) * HEIGHT;
+const WINDOW_WIDTH: usize = (TARGET_WIDTH / WIDTH) * WIDTH;
+const WINDOW_HEIGHT: usize = (TARGET_HEIGHT / HEIGHT) * HEIGHT;
 
 const CELL_WIDTH: usize = WINDOW_WIDTH / WIDTH;
 const CELL_HEIGHT: usize = WINDOW_HEIGHT / HEIGHT;
@@ -92,7 +93,9 @@ impl DisplayMode {
     }
 }
 
-fn main() {
+
+#[show_image::main]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     let mut display_mode = if args.len() > 1 {
@@ -137,67 +140,72 @@ fn main() {
     };
 
     let mut float_buffer: Vec<f64> = vec![0.0; WIDTH * HEIGHT * 3];
-    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
-    let mut display_buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
+    let mut display_buffer: Vec<u8> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT * 3];
 
-    let options = WindowOptions {
-        scale: Scale::X2,
-        ..WindowOptions::default()
-    };
-    let mut window = Window::new("ESC to exit", WINDOW_WIDTH, WINDOW_HEIGHT, options)
-        .expect("Unable to open window");
+    let window = create_window("veather", Default::default())?;
 
-    let mut sim = WeatherSim::new(Vec2::new(WIDTH, HEIGHT).as_());
-    let first_update = Instant::now();
-    let mut last_update = first_update;
-    let mut tick: u64 = 0;
-    let mut auto_play = false;
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        let now = Instant::now();
-        let (redraw, do_tick) = {
-            if window.is_key_pressed(Key::Space, KeyRepeat::No) {
-                auto_play = !auto_play;
-            }
-            if window.is_key_pressed(Key::C, KeyRepeat::No) {
-                display_mode.kind = DisplayKind::Clouds;
-                (true, false)
-            } else if window.is_key_pressed(Key::W, KeyRepeat::No) {
-                display_mode.kind = DisplayKind::Wind;
-                (true, false)
-            } else if auto_play || window.is_key_pressed(Key::Right, KeyRepeat::Yes) {
-                (true, true)
-            } else {
-                (false, false)
-            }
-        };
-        if do_tick {
-            sim.tick(1.0);
-        }
+    let mut draw = |sim: &WeatherSim, display_mode: &DisplayMode, tick| {
+        float_buffer.iter_mut().for_each(|x| *x = 0.0);
 
-        if redraw {
-            float_buffer.iter_mut().for_each(|x| *x = 0.0);
-
-            display_mode.display(&mut float_buffer, &sim);
-            for i in 0..WIDTH * HEIGHT {
-                let a = 255.0 * (float_buffer[i * 3]).min(1.0);
-                let b = 255.0 * (float_buffer[i * 3 + 1]).min(1.0);
-                let c = 255.0 * (float_buffer[i * 3 + 2]).min(1.0);
-                let color = (a as u32) << 16 | (b as u32) << 8 | c as u32;
-                buffer[i] = color;
-            }
-            for y in 0..WINDOW_HEIGHT {
-                for x in 0..WINDOW_WIDTH {
-                    display_buffer[y * WINDOW_WIDTH + x] =
-                        buffer[y / CELL_HEIGHT * WIDTH + x / CELL_WIDTH];
+        display_mode.display(&mut float_buffer, &sim);
+        for i in 0..WIDTH * HEIGHT {
+            let r = (255.0 * (float_buffer[i * 3]).min(1.0)) as u8;
+            let b = (255.0 * (float_buffer[i * 3 + 1]).min(1.0)) as u8;
+            let g = (255.0 * (float_buffer[i * 3 + 2]).min(1.0)) as u8;
+            
+            let y = CELL_HEIGHT * (i / WIDTH);
+            let x = CELL_WIDTH * (i % WIDTH);
+            for y in y..y + CELL_HEIGHT {
+                for x in x..x + CELL_WIDTH {
+                    let i = y * WINDOW_WIDTH + x;
+                    display_buffer[i * 3] = r;
+                    display_buffer[i * 3 + 1] = b;
+                    display_buffer[i * 3 + 2] = g;
                 }
             }
-            last_update = now;
-            tick += 1;
-            window.set_title(format!("{}", tick).as_str());
         }
+        let image = ImageView::new(ImageInfo::rgb8(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32), &display_buffer);
+        window.set_image(format!("veather: {}", tick).as_str(), image)
+    };
 
-        window
-            .update_with_buffer(&display_buffer, WINDOW_WIDTH, WINDOW_HEIGHT)
-            .unwrap();
+    let mut sim = WeatherSim::new(Vec2::new(WIDTH, HEIGHT).as_());
+    let mut tick: u64 = 0;
+
+    draw(&sim, &display_mode, tick)?;
+
+    for event in window.event_channel()? {
+        if let WindowEvent::KeyboardInput(event) = event && event.input.state.is_pressed() && let Some(key_code) = event.input.key_code {
+            let redraw = match key_code {
+                VirtualKeyCode::Escape => break,
+                VirtualKeyCode::C => {
+                    display_mode.kind = DisplayKind::Clouds;
+                    true
+                },
+                VirtualKeyCode::W => {
+                    display_mode.kind = DisplayKind::Wind;
+                    true
+                },
+                VirtualKeyCode::R => {
+                    display_mode.kind = DisplayKind::Rain;
+                    true
+                },
+                VirtualKeyCode::A => {
+                    display_mode.kind = DisplayKind::Altitude;
+                    true
+                },
+                VirtualKeyCode::Right => {
+                    sim.tick(tick as f64 * sim::DT);
+                    tick += 1;
+                    true
+                },
+
+                _ => false
+            };
+
+            if redraw {
+                draw(&sim, &display_mode, tick)?;
+            }
+        }
     }
+    Ok(())
 }
